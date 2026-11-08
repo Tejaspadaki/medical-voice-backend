@@ -19,11 +19,21 @@ def get_mongo_client() -> MongoClient:
             mongo_client = MongoClient(
                 settings.MONGODB_URL,
                 serverSelectionTimeoutMS=8000,
-                tlsCAFile=ca
+                connectTimeoutMS=8000,
+                socketTimeoutMS=10000,
+                tls=True,
+                tlsCAFile=ca,
+                tlsAllowInvalidCertificates=True
             )
         except Exception as e:
             logger.warning(f"Failed to use certifi CA bundle, falling back: {e}")
-            mongo_client = MongoClient(settings.MONGODB_URL, serverSelectionTimeoutMS=8000)
+            mongo_client = MongoClient(
+                settings.MONGODB_URL,
+                serverSelectionTimeoutMS=8000,
+                connectTimeoutMS=8000,
+                socketTimeoutMS=10000,
+                tlsAllowInvalidCertificates=True
+            )
     return mongo_client
 
 def get_mongo_db():
