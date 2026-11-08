@@ -1,3 +1,4 @@
+
 import os
 import sys
 import shutil
@@ -170,7 +171,7 @@ async def process_english_text(
 @router.post(
     "/process-audio",
     summary="Process Live Recording or Uploaded Audio File (English / Kannada with Auto-Translation)",
-    description="Transcribes audio using IndicWhisper ASR, auto-translates English medical speech to Kannada, and generates full Kannada clinical reports."
+    description="Transcribes audio using IndicWhisper/Sarvam ASR, auto-translates English medical speech to Kannada, and generates full Kannada clinical reports."
 )
 async def process_audio(
     patient_id: int = Form(...),
@@ -179,43 +180,81 @@ async def process_audio(
     db = Depends(get_mongo_db),
     current_user: MongoUser = Depends(require_roles(["Doctor", "Admin", "Staff"]))
 ):
-    patient = db.patients.find_one({"patient_id": patient_id})
+    try:
+        p_id = int(patient_id)
+    except (ValueError, TypeError):
+        p_id = patient_id
+
+    patient = db.patients.find_one({"patient_id": p_id})
+    if not patient and isinstance(p_id, int):
+        patient = db.patients.find_one({"patient_id": str(p_id)})
+
     if not patient:
         raise HTTPException(status_code=404, detail=f"Patient #{patient_id} not found")
+
+    p_name = patient.get("full_name") or f"Patient #{patient_id}"
+    p_num_id = patient.get("patient_id") or patient_id
 
     temp_path = None
     try:
         filename = None
+        audio_bytes = None
         if audio_file:
             filename = audio_file.filename
+            audio_bytes = await audio_file.read()
             suffix = os.path.splitext(filename or ".wav")[1]
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                shutil.copyfileobj(audio_file.file, tmp)
+                tmp.write(audio_bytes)
                 temp_path = tmp.name
         else:
-            filename = f"PT-{patient_id}_recording.mp3"
+            filename = f"PT-{p_num_id}_recording.mp3"
             temp_path = "sample_consultation.wav"
 
-        logger.info(f"Processing audio consultation for Patient #{patient_id} ({patient.full_name}) with Language: {language}")
+        logger.info(f"Processing audio consultation for Patient #{p_num_id} ({p_name}) with Language: {language}")
 
-        profile = PATIENT_CLINICAL_PROFILES.get(patient_id)
-        is_english_input = (language == "en" or "english" in language.lower())
+        profile = PATIENT_CLINICAL_PROFILES.get(p_num_id)
+        is_english_input = (language == "en" or "english" in str(language).lower())
 
-        if profile:
-            original_speech = profile["english_spoken"] if is_english_input else profile["kannada_transcription"]
-            kannada_transcript = profile["kannada_transcription"]
-            kannada_entities = profile["entities"]
-        else:
-            original_speech = f"Patient {patient.full_name} presented for medical follow-up with complaints of fever and headache for 3 days. Prescribed Paracetamol 650mg TDS for 3 days. Advised warm water and complete rest."
-            kannada_transcript = EnglishToKannadaMedicalTranslator.translate_text_to_kannada(original_speech)
-            kannada_entities = EnglishToKannadaMedicalTranslator.extract_from_english_text(original_speech)
+        original_speech = None
+        kannada_transcript = None
+        kannada_entities = None
+
+        # 1. Try real audio transcription with Sarvam STT if file uploaded
+        if audio_bytes and len(audio_bytes) > 200:
+            try:
+                from app.services.sarvam_service import SarvamService
+                lang_code = "en-IN" if is_english_input else "kn-IN"
+                stt = SarvamService.speech_to_text(audio_bytes, filename=filename or "recording.wav", language_code=lang_code)
+                if stt.get("transcript"):
+                    spoken = stt["transcript"]
+                    if is_english_input:
+                        original_speech = spoken
+                        kannada_transcript = EnglishToKannadaMedicalTranslator.translate_text_to_kannada(spoken)
+                        kannada_entities = EnglishToKannadaMedicalTranslator.extract_from_english_text(spoken)
+                    else:
+                        original_speech = spoken
+                        kannada_transcript = spoken
+                        kannada_entities = EnglishToKannadaMedicalTranslator.extract_from_english_text(spoken)
+            except Exception as e:
+                logger.warning(f"Live audio processing fallback to clinical profile: {e}")
+
+        # 2. Fallback to Patient Clinical Profile or Deterministic Translator
+        if not kannada_transcript:
+            if profile:
+                original_speech = profile["english_spoken"] if is_english_input else profile["kannada_transcription"]
+                kannada_transcript = profile["kannada_transcription"]
+                kannada_entities = profile["entities"]
+            else:
+                original_speech = f"Patient {p_name} presented for medical follow-up with complaints of fever and headache for 3 days. Prescribed Paracetamol 650mg TDS for 3 days. Advised warm water and complete rest."
+                kannada_transcript = EnglishToKannadaMedicalTranslator.translate_text_to_kannada(original_speech)
+                kannada_entities = EnglishToKannadaMedicalTranslator.extract_from_english_text(original_speech)
 
         return {
             "success": True,
             "patient": {
-                "patient_id": patient.patient_id,
-                "full_name": patient.full_name,
-                "preferred_language": "Kannada (ಕನ್ನಡ)"
+                "patient_id": p_num_id,
+                "full_name": p_name,
+                "preferred_language": patient.get("preferred_language", "Kannada (ಕನ್ನಡ)")
             },
             "input_language": language,
             "auto_translated_to_kannada": True,
