@@ -1,4 +1,5 @@
 import os
+import certifi
 from datetime import datetime, timezone, date
 from typing import Dict, Any, Optional, List
 from pymongo import MongoClient, ReturnDocument
@@ -13,7 +14,16 @@ def get_mongo_client() -> MongoClient:
     global mongo_client
     if mongo_client is None:
         logger.info(f"Connecting to MongoDB: {settings.MONGODB_URL.split('@')[-1] if '@' in settings.MONGODB_URL else 'localhost'}...")
-        mongo_client = MongoClient(settings.MONGODB_URL, serverSelectionTimeoutMS=8000)
+        try:
+            ca = certifi.where()
+            mongo_client = MongoClient(
+                settings.MONGODB_URL,
+                serverSelectionTimeoutMS=8000,
+                tlsCAFile=ca
+            )
+        except Exception as e:
+            logger.warning(f"Failed to use certifi CA bundle, falling back: {e}")
+            mongo_client = MongoClient(settings.MONGODB_URL, serverSelectionTimeoutMS=8000)
     return mongo_client
 
 def get_mongo_db():
