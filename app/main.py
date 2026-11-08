@@ -60,6 +60,15 @@ app.include_router(patients_router, prefix="/api/v1")
 app.include_router(consultations_router, prefix="/api/v1")
 app.include_router(voice_agent_router, prefix="/api/v1")
 
+@app.get("/", tags=["Root"])
+def root():
+    return {
+        "status": "online",
+        "message": "Medical Speech Transcription API is running.",
+        "docs": "/docs",
+        "health": "/health"
+    }
+
 @app.get("/health", tags=["System Health"])
 def health_check():
     return {
