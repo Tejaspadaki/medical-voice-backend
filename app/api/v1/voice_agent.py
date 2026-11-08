@@ -4,13 +4,9 @@ import shutil
 import tempfile
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status
-from sqlalchemy.orm import Session
 
-from app.db.session import get_db
+from app.db.mongo import get_mongo_db
 from app.core.dependencies import get_current_user, require_roles
-from app.models.user import User
-from app.models.patient import Patient
-from app.models.voice_agent import VoiceChatSession, VoiceChatTurn, PendingClinicalAction
 from app.schemas.voice_agent import (
     VoiceSessionCreateRequest,
     VoiceSessionResponse,
@@ -22,7 +18,7 @@ from app.schemas.voice_agent import (
     VoiceTTSResponse,
     PendingActionDTO
 )
-from app.services.voice_orchestrator import VoiceOrchestratorService
+from app.services.voice_orchestrator import VoiceOrchestratorService, SessionWrapper
 from app.services.sarvam_service import SarvamService
 from app.core.logging import logger
 
@@ -35,8 +31,8 @@ router = APIRouter(prefix="/voice-agent", tags=["Voice Chat Assistant & Clinical
 )
 def start_voice_session(
     payload: VoiceSessionCreateRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Doctor", "Admin", "Staff"]))
+    db = Depends(get_mongo_db),
+    current_user = Depends(require_roles(["Doctor", "Admin", "Staff"]))
 ):
     session = VoiceOrchestratorService.get_or_create_session(
         db=db,
@@ -63,12 +59,14 @@ def start_voice_session(
 )
 def get_voice_session(
     session_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Doctor", "Admin", "Staff"]))
+    db = Depends(get_mongo_db),
+    current_user = Depends(require_roles(["Doctor", "Admin", "Staff"]))
 ):
-    session = db.query(VoiceChatSession).filter(VoiceChatSession.session_id == session_id).first()
-    if not session:
+    sess_doc = db.voice_chat_sessions.find_one({"session_id": session_id})
+    if not sess_doc:
         raise HTTPException(status_code=404, detail=f"Voice session {session_id} not found")
+
+    session = SessionWrapper(sess_doc, db)
 
     turns = [
         {
@@ -76,13 +74,13 @@ def get_voice_session(
             "speaker": t.speaker,
             "transcript": t.transcript,
             "intent": t.intent_detected,
-            "created_at": t.created_at.isoformat()
+            "created_at": t.created_at.isoformat() if hasattr(t.created_at, "isoformat") else str(t.created_at)
         }
         for t in session.turns
     ]
 
     active_pending = VoiceOrchestratorService._get_active_pending_action(db, session_id)
-    pending_dto = PendingActionDTO.from_orm(active_pending) if active_pending else None
+    pending_dto = active_pending.to_dto() if active_pending else None
 
     return {
         "session_id": session.session_id,
@@ -104,13 +102,14 @@ async def process_voice_turn(
     text_input: Optional[str] = Form(None),
     language: Optional[str] = Form("kn"),
     audio_file: Optional[UploadFile] = File(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Doctor", "Admin", "Staff"]))
+    db = Depends(get_mongo_db),
+    current_user = Depends(require_roles(["Doctor", "Admin", "Staff"]))
 ):
-    session = db.query(VoiceChatSession).filter(VoiceChatSession.session_id == session_id).first()
-    if not session:
+    sess_doc = db.voice_chat_sessions.find_one({"session_id": session_id})
+    if not sess_doc:
         raise HTTPException(status_code=404, detail=f"Voice session {session_id} not found")
 
+    session = SessionWrapper(sess_doc, db)
     input_text = text_input
 
     # If audio is provided, run Sarvam STT first, then fallback
@@ -171,12 +170,14 @@ async def process_voice_turn(
 )
 def process_voice_turn_json(
     payload: VoiceTurnRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Doctor", "Admin", "Staff"]))
+    db = Depends(get_mongo_db),
+    current_user = Depends(require_roles(["Doctor", "Admin", "Staff"]))
 ):
-    session = db.query(VoiceChatSession).filter(VoiceChatSession.session_id == payload.session_id).first()
-    if not session:
+    sess_doc = db.voice_chat_sessions.find_one({"session_id": payload.session_id})
+    if not sess_doc:
         raise HTTPException(status_code=404, detail=f"Voice session {payload.session_id} not found")
+
+    session = SessionWrapper(sess_doc, db)
 
     if not payload.text_input or not payload.text_input.strip():
         raise HTTPException(status_code=400, detail="text_input cannot be empty.")
@@ -206,11 +207,11 @@ def process_voice_turn_json(
 )
 def confirm_clinical_action(
     payload: VoiceConfirmRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Doctor", "Admin", "Staff"]))
+    db = Depends(get_mongo_db),
+    current_user = Depends(require_roles(["Doctor", "Admin", "Staff"]))
 ):
-    session = db.query(VoiceChatSession).filter(VoiceChatSession.session_id == payload.session_id).first()
-    if not session:
+    sess_doc = db.voice_chat_sessions.find_one({"session_id": payload.session_id})
+    if not sess_doc:
         raise HTTPException(status_code=404, detail=f"Voice session {payload.session_id} not found")
 
     res = VoiceOrchestratorService.execute_pending_action(
@@ -236,10 +237,8 @@ def confirm_clinical_action(
 )
 def generate_voice_tts(
     payload: VoiceTTSRequest,
-    current_user: User = Depends(require_roles(["Doctor", "Admin", "Staff"]))
+    current_user = Depends(require_roles(["Doctor", "Admin", "Staff"]))
 ):
     lang_code = "kn-IN" if payload.language == "kn" else "en-IN"
     audio_b64 = SarvamService.text_to_speech(payload.text, language_code=lang_code)
     return VoiceTTSResponse(text=payload.text, audio_b64=audio_b64, provider="sarvam")
-
-

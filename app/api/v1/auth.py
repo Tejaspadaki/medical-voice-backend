@@ -3,9 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Header, Request, 
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
-from app.core.dependencies import get_current_user
-from app.models.user import User
+from app.db.mongo import get_mongo_db
+from app.core.dependencies import get_current_user, MongoUser
 from app.schemas.auth import (
     LoginRequest,
     TokenResponse,
@@ -26,7 +25,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 )
 async def login(
     request: Request,
-    db: Session = Depends(get_db)
+    db = Depends(get_mongo_db)
 ):
     # Check if request is JSON or form-data
     content_type = request.headers.get("content-type", "")
@@ -77,7 +76,7 @@ async def login(
 )
 def refresh_token(
     payload: RefreshTokenRequest,
-    db: Session = Depends(get_db)
+    db = Depends(get_mongo_db)
 ):
     access_token, expires_in = AuthService.refresh_access_token(db, payload.refresh_token)
     return RefreshTokenResponse(
@@ -109,6 +108,6 @@ def logout(
     description="Get authenticated user profile details, role, and medical registration."
 )
 def get_me(
-    current_user: User = Depends(get_current_user)
+    current_user: MongoUser = Depends(get_current_user)
 ):
     return current_user

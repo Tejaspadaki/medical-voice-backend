@@ -1,10 +1,8 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, Query, Path, status
-from sqlalchemy.orm import Session
 
-from app.db.session import get_db
-from app.core.dependencies import get_current_user, require_roles
-from app.models.user import User
+from app.db.mongo import get_mongo_db
+from app.core.dependencies import get_current_user, require_roles, MongoUser
 from app.schemas.patient import (
     PatientCreate,
     PatientUpdate,
@@ -24,8 +22,8 @@ router = APIRouter(prefix="/patients", tags=["Patients"])
 )
 def create_patient(
     patient_in: PatientCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Doctor", "Admin", "Staff"]))
+    db = Depends(get_mongo_db),
+    current_user: MongoUser = Depends(require_roles(["Doctor", "Admin", "Staff"]))
 ):
     return PatientService.create_patient(db, patient_in)
 
@@ -41,8 +39,8 @@ def list_patients(
     language: Optional[str] = Query(None, description="Filter by preferred language"),
     page: int = Query(1, ge=1, description="Page number"),
     size: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db = Depends(get_mongo_db),
+    current_user: MongoUser = Depends(get_current_user)
 ):
     items, total = PatientService.list_patients(
         db=db,
@@ -67,8 +65,8 @@ def list_patients(
 )
 def get_patient(
     patient_id: int = Path(..., ge=1, description="Primary key ID of patient"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db = Depends(get_mongo_db),
+    current_user: MongoUser = Depends(get_current_user)
 ):
     patient = PatientService.get_patient_by_id(db, patient_id)
     return PatientResponse.model_validate(patient)
@@ -82,25 +80,22 @@ def get_patient(
 def update_patient(
     patient_id: int = Path(..., ge=1),
     update_in: PatientUpdate = ...,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Doctor", "Admin", "Staff"]))
+    db = Depends(get_mongo_db),
+    current_user: MongoUser = Depends(require_roles(["Doctor", "Admin", "Staff"]))
 ):
     patient = PatientService.update_patient(db, patient_id, update_in)
     return PatientResponse.model_validate(patient)
 
 @router.delete(
     "/{patient_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete Patient Record",
-    description="Remove patient and cascade-delete all associated clinical consultations. Requires Doctor or Admin role."
+    description="Remove patient and associated consultations. Requires Admin role."
 )
 def delete_patient(
     patient_id: int = Path(..., ge=1),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Doctor", "Admin"]))
+    db = Depends(get_mongo_db),
+    current_user: MongoUser = Depends(require_roles(["Admin", "Doctor"]))
 ):
     PatientService.delete_patient(db, patient_id)
-    return {
-        "success": True,
-        "message": f"Patient #{patient_id} and all related medical records deleted successfully."
-    }
-
+    return None

@@ -17,12 +17,8 @@ for p in ai_pipeline_paths:
     if os.path.exists(p) and p not in sys.path:
         sys.path.insert(0, p)
 
-from app.db.session import get_db
-from app.core.dependencies import get_current_user, require_roles
-from app.models.user import User
-from app.models.patient import Patient
-from app.models.consultation import Consultation
-from app.models.medical_report import MedicalReport
+from app.db.mongo import get_mongo_db, clean_doc
+from app.core.dependencies import get_current_user, require_roles, MongoUser
 from app.schemas.consultation import ConsultationCreateRequest, ConsultationResponse, ConsultationListResponse
 from app.services.consultation_service import ConsultationService
 from app.core.logging import logger
@@ -138,14 +134,15 @@ class EnglishConsultationTextRequest(BaseModel):
 )
 async def process_english_text(
     payload: EnglishConsultationTextRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Doctor", "Admin", "Staff"]))
+    db = Depends(get_mongo_db),
+    current_user: MongoUser = Depends(require_roles(["Doctor", "Admin", "Staff"]))
 ):
-    patient = db.query(Patient).filter(Patient.patient_id == payload.patient_id).first()
+    patient = db.patients.find_one({"patient_id": payload.patient_id})
     if not patient:
         raise HTTPException(status_code=404, detail=f"Patient #{payload.patient_id} not found")
 
-    logger.info(f"Translating English notes to Kannada for Patient #{payload.patient_id} ({patient.full_name})")
+    p_name = patient.get("full_name", "Patient")
+    logger.info(f"Translating English notes to Kannada for Patient #{payload.patient_id} ({p_name})")
 
     kannada_transcript = EnglishToKannadaMedicalTranslator.translate_text_to_kannada(payload.english_text)
     kannada_entities = EnglishToKannadaMedicalTranslator.extract_from_english_text(payload.english_text)
@@ -153,8 +150,8 @@ async def process_english_text(
     return {
         "success": True,
         "patient": {
-            "patient_id": patient.patient_id,
-            "full_name": patient.full_name,
+            "patient_id": patient.get("patient_id"),
+            "full_name": p_name,
             "preferred_language": "Kannada (ಕನ್ನಡ)"
         },
         "input_language": "en",
@@ -179,10 +176,10 @@ async def process_audio(
     patient_id: int = Form(...),
     language: str = Form("kn"),
     audio_file: Optional[UploadFile] = File(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Doctor", "Admin", "Staff"]))
+    db = Depends(get_mongo_db),
+    current_user: MongoUser = Depends(require_roles(["Doctor", "Admin", "Staff"]))
 ):
-    patient = db.query(Patient).filter(Patient.patient_id == patient_id).first()
+    patient = db.patients.find_one({"patient_id": patient_id})
     if not patient:
         raise HTTPException(status_code=404, detail=f"Patient #{patient_id} not found")
 
@@ -242,13 +239,13 @@ async def process_audio(
 
 @router.post(
     "/approve-report",
-    summary="Approve and Finalize Doctor-Reviewed Report (Saves to SQL Database & Generates PDF File)",
-    description="Doctor review confirmation and digital signature. Persists to SQL database tables (consultations & medical_reports) and generates PDF prescription file."
+    summary="Approve and Finalize Doctor-Reviewed Report (Saves to MongoDB & Generates PDF File)",
+    description="Doctor review confirmation and digital signature. Persists to MongoDB database collections and generates PDF prescription file."
 )
 def approve_report(
     payload: ConsultationCreateRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Doctor", "Admin"]))
+    db = Depends(get_mongo_db),
+    current_user: MongoUser = Depends(require_roles(["Doctor", "Admin"]))
 ):
     consultation = ConsultationService.create_and_approve_consultation(
         db=db,
@@ -256,38 +253,43 @@ def approve_report(
         current_user=current_user
     )
 
-    logger.info(f"Kannada report #{consultation.report_id} approved and saved by {consultation.signed_by_name} for Patient #{payload.patient_id}")
+    c_rid = consultation.get("report_id")
+    c_name = consultation.get("signed_by_name")
+    c_id = consultation.get("consultation_id")
+    c_pdf = consultation.get("pdf_filename")
+
+    logger.info(f"Kannada report #{c_rid} approved and saved by {c_name} for Patient #{payload.patient_id}")
 
     return {
         "success": True,
         "status": "APPROVED",
         "message": "ವೈದ್ಯಕೀಯ ವರದಿಯನ್ನು ಯಶಸ್ವಿಯಾಗಿ ಪರಿಶೀಲಿಸಿ, ಡಿಜಿಟಲ್ ಸಹಿ ಮಾಡಿ ಡೇಟಾಬೇಸ್‌ನಲ್ಲಿ ಮತ್ತು PDF ರೂಪದಲ್ಲಿ ಉಳಿಸಲಾಗಿದೆ.",
-        "consultation_id": consultation.consultation_id,
-        "report_id": consultation.report_id,
-        "pdf_filename": consultation.pdf_filename,
-        "pdf_download_url": f"/api/v1/consultations/{consultation.consultation_id}/download-pdf",
+        "consultation_id": c_id,
+        "report_id": c_rid,
+        "pdf_filename": c_pdf,
+        "pdf_download_url": f"/api/v1/consultations/{c_id}/download-pdf",
         "doctor_sign_off": {
-            "signed_by": consultation.signed_by_name,
-            "registration_no": consultation.signed_doctor_reg,
-            "timestamp": consultation.signed_at.isoformat()
+            "signed_by": c_name,
+            "registration_no": consultation.get("signed_doctor_reg"),
+            "timestamp": consultation.get("signed_at", "").isoformat() if hasattr(consultation.get("signed_at"), "isoformat") else str(consultation.get("signed_at"))
         },
         "report_data": {
-            "consultation_id": consultation.consultation_id,
-            "patient_id": consultation.patient_id,
-            "report_id": consultation.report_id,
-            "input_language": consultation.input_language,
-            "original_english_speech": consultation.original_english_speech,
-            "transcript_text": consultation.kannada_transcript,
-            "symptoms": consultation.symptoms,
-            "diagnosis": consultation.diagnosis,
-            "medications": consultation.medications,
-            "advice": consultation.advice,
-            "status": consultation.status,
-            "signed_by_name": consultation.signed_by_name,
-            "signed_doctor_reg": consultation.signed_doctor_reg,
-            "pdf_filename": consultation.pdf_filename,
-            "created_at": consultation.created_at.isoformat(),
-            "signed_at": consultation.signed_at.isoformat()
+            "consultation_id": c_id,
+            "patient_id": consultation.get("patient_id"),
+            "report_id": c_rid,
+            "input_language": consultation.get("input_language"),
+            "original_english_speech": consultation.get("original_english_speech"),
+            "transcript_text": consultation.get("kannada_transcript"),
+            "symptoms": consultation.get("symptoms", []),
+            "diagnosis": consultation.get("diagnosis", []),
+            "medications": consultation.get("medications", []),
+            "advice": consultation.get("advice", []),
+            "status": consultation.get("status"),
+            "signed_by_name": c_name,
+            "signed_doctor_reg": consultation.get("signed_doctor_reg"),
+            "pdf_filename": c_pdf,
+            "created_at": consultation.get("created_at", "").isoformat() if hasattr(consultation.get("created_at"), "isoformat") else str(consultation.get("created_at")),
+            "signed_at": consultation.get("signed_at", "").isoformat() if hasattr(consultation.get("signed_at"), "isoformat") else str(consultation.get("signed_at"))
         }
     }
 
@@ -297,58 +299,61 @@ def approve_report(
 )
 def download_consultation_pdf(
     consultation_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Doctor", "Admin", "Staff"]))
+    db = Depends(get_mongo_db),
+    current_user: MongoUser = Depends(require_roles(["Doctor", "Admin", "Staff"]))
 ):
     consultation = ConsultationService.get_consultation_by_id(db=db, consultation_id=consultation_id)
-    if not consultation.pdf_file_path or not os.path.exists(consultation.pdf_file_path):
-        # Regenerate if missing
+    pdf_path = consultation.get("pdf_file_path")
+    pdf_filename = consultation.get("pdf_filename") or f"Prescription_{consultation.get('report_id')}.pdf"
+
+    if not pdf_path or not os.path.exists(pdf_path):
         from app.services.pdf_service import PdfReportService
-        patient = db.query(Patient).filter(Patient.patient_id == consultation.patient_id).first()
-        PdfReportService.generate_and_save_pdf_report(
+        patient = db.patients.find_one({"patient_id": consultation.get("patient_id")})
+        report_res = PdfReportService.generate_and_save_pdf_report(
             db=db,
             consultation=consultation,
             patient=patient,
-            doctor_name=consultation.signed_by_name or "Doctor",
-            doctor_reg=consultation.signed_doctor_reg or "KMC-84920"
+            doctor_name=consultation.get("signed_by_name") or "Doctor",
+            doctor_reg=consultation.get("signed_doctor_reg") or "KMC-84920"
         )
+        pdf_path = report_res.get("pdf_file_path")
 
-    if not consultation.pdf_file_path or not os.path.exists(consultation.pdf_file_path):
+    if not pdf_path or not os.path.exists(pdf_path):
         raise HTTPException(status_code=404, detail="PDF report file not found on server")
 
     return FileResponse(
-        path=consultation.pdf_file_path,
-        filename=consultation.pdf_filename or f"Prescription_{consultation.report_id}.pdf",
+        path=pdf_path,
+        filename=pdf_filename,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{consultation.pdf_filename or f"Prescription_{consultation.report_id}.pdf"}"'}
+        headers={"Content-Disposition": f'attachment; filename="{pdf_filename}"'}
     )
 
 @router.get(
     "/{consultation_id}/pdf-record",
-    summary="Get PDF record and Base64 metadata from SQL database"
+    summary="Get PDF record and Base64 metadata from database"
 )
 def get_pdf_record(
     consultation_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Doctor", "Admin", "Staff"]))
+    db = Depends(get_mongo_db),
+    current_user: MongoUser = Depends(require_roles(["Doctor", "Admin", "Staff"]))
 ):
-    report_record = db.query(MedicalReport).filter(MedicalReport.consultation_id == consultation_id).first()
+    report_record = db.medical_reports.find_one({"consultation_id": consultation_id})
     if not report_record:
         raise HTTPException(status_code=404, detail="PDF record not found in database")
 
     return {
-        "report_record_id": report_record.report_record_id,
-        "consultation_id": report_record.consultation_id,
-        "patient_id": report_record.patient_id,
-        "report_code": report_record.report_code,
-        "pdf_filename": report_record.pdf_filename,
-        "file_size_bytes": report_record.file_size_bytes,
-        "mime_type": report_record.mime_type,
-        "signed_doctor_name": report_record.signed_doctor_name,
-        "signed_doctor_reg": report_record.signed_doctor_reg,
-        "created_at": report_record.created_at.isoformat(),
+        "report_record_id": str(report_record.get("_id", "")),
+        "consultation_id": report_record.get("consultation_id"),
+        "patient_id": report_record.get("patient_id"),
+        "report_code": report_record.get("report_code"),
+        "pdf_filename": report_record.get("pdf_filename"),
+        "file_size_bytes": report_record.get("file_size_bytes"),
+        "mime_type": report_record.get("mime_type"),
+        "signed_doctor_name": report_record.get("signed_doctor_name"),
+        "signed_doctor_reg": report_record.get("signed_doctor_reg"),
+        "created_at": report_record.get("created_at", "").isoformat() if hasattr(report_record.get("created_at"), "isoformat") else str(report_record.get("created_at")),
         "pdf_download_url": f"/api/v1/consultations/{consultation_id}/download-pdf",
-        "pdf_base64_data": report_record.pdf_base64_data
+        "pdf_base64_data": report_record.get("pdf_base64_data")
     }
 
 @router.get(
@@ -358,8 +363,8 @@ def get_pdf_record(
 )
 def get_patient_consultations(
     patient_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Doctor", "Admin", "Staff"]))
+    db = Depends(get_mongo_db),
+    current_user: MongoUser = Depends(require_roles(["Doctor", "Admin", "Staff"]))
 ):
     return ConsultationService.get_consultations_for_patient(db=db, patient_id=patient_id)
 
@@ -370,8 +375,8 @@ def get_patient_consultations(
 )
 def get_consultation(
     consultation_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Doctor", "Admin", "Staff"]))
+    db = Depends(get_mongo_db),
+    current_user: MongoUser = Depends(require_roles(["Doctor", "Admin", "Staff"]))
 ):
     return ConsultationService.get_consultation_by_id(db=db, consultation_id=consultation_id)
 
@@ -382,8 +387,8 @@ def get_consultation(
 )
 def delete_consultation(
     consultation_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Doctor", "Admin"]))
+    db = Depends(get_mongo_db),
+    current_user: MongoUser = Depends(require_roles(["Doctor", "Admin"]))
 ):
     ConsultationService.delete_consultation(db=db, consultation_id=consultation_id)
     return None

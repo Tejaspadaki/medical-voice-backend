@@ -8,15 +8,17 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.patients import router as patients_router
 from app.api.v1.consultations import router as consultations_router
 from app.api.v1.voice_agent import router as voice_agent_router
-from app.db.session import engine, Base
-import app.models # Register all models
+from app.db.mongo import init_mongo_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Medical Transcription System API...")
-    # Create tables if not created yet (for instant dev setup)
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database schema validated.")
+    # Initialize MongoDB collections, indexes, and initial clinical seeds
+    try:
+        init_mongo_db()
+        logger.info("MongoDB Atlas collections and indexes initialized successfully.")
+    except Exception as e:
+        logger.error(f"Error initializing MongoDB: {e}", exc_info=True)
     yield
     logger.info("Shutting down Medical Transcription System API...")
 
@@ -64,7 +66,7 @@ app.include_router(voice_agent_router, prefix="/api/v1")
 def root():
     return {
         "status": "online",
-        "message": "Medical Speech Transcription API is running.",
+        "message": "Medical Speech Transcription API is running with MongoDB Atlas.",
         "docs": "/docs",
         "health": "/health"
     }
@@ -75,5 +77,5 @@ def health_check():
         "status": "healthy",
         "service": settings.PROJECT_NAME,
         "environment": settings.ENVIRONMENT,
-        "database": "sqlite/relational-sql"
+        "database": "mongodb-atlas"
     }

@@ -12,7 +12,20 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
     
-    # Database (SQLite standard SQL relational storage or PostgreSQL)
+    # MongoDB Database Configuration
+    MONGODB_URL: str = "mongodb+srv://padakitejas_db_user:LBY4id3EGea93pRj@cluster0.aborp1b.mongodb.net/?retryWrites=true&w=majority"
+    MONGODB_DB_NAME: str = "medical_system"
+
+    @field_validator("MONGODB_URL", mode="before")
+    def assemble_mongodb_url(cls, v: Optional[str]) -> str:
+        if v and v.strip():
+            return v.strip()
+        env_uri = os.getenv("MONGODB_URI") or os.getenv("MONGO_URI")
+        if env_uri and env_uri.strip():
+            return env_uri.strip()
+        return "mongodb+srv://padakitejas_db_user:LBY4id3EGea93pRj@cluster0.aborp1b.mongodb.net/?retryWrites=true&w=majority"
+
+    # Database (SQLite standard SQL relational storage or PostgreSQL fallback)
     DATABASE_URL: str = "sqlite:///./medical_system.db"
 
     @field_validator("DATABASE_URL", mode="before")

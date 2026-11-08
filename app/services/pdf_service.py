@@ -15,6 +15,8 @@ from app.models.medical_report import MedicalReport
 from app.models.patient import Patient
 from app.models.user import User
 from app.core.logging import logger
+from app.db.mongo import DictObj
+
 
 REPORTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../generated_reports"))
 os.makedirs(REPORTS_DIR, exist_ok=True)
@@ -52,16 +54,23 @@ init_kannada_fonts()
 class PdfReportService:
     @staticmethod
     def generate_and_save_pdf_report(
-        db: Session,
-        consultation: Consultation,
-        patient: Patient,
+        db: Any,
+        consultation: Any,
+        patient: Any,
         doctor_name: str,
         doctor_reg: str
-    ) -> MedicalReport:
+    ) -> Any:
         init_kannada_fonts()
 
-        clean_name = "".join(c for c in patient.full_name if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
-        pdf_filename = f"Prescription_{clean_name}_{consultation.report_id}.pdf"
+        if isinstance(consultation, dict):
+            consultation = DictObj(consultation)
+        if isinstance(patient, dict):
+            patient = DictObj(patient)
+
+        p_name = getattr(patient, "full_name", "Patient") or "Patient"
+        c_rid = getattr(consultation, "report_id", "REP") or "REP"
+        clean_name = "".join(c for c in p_name if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
+        pdf_filename = f"Prescription_{clean_name}_{c_rid}.pdf"
         pdf_file_path = os.path.join(REPORTS_DIR, pdf_filename)
 
         # Build PDF with ReportLab
@@ -287,41 +296,70 @@ class PdfReportService:
         pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
         file_size = len(pdf_bytes)
 
-        # Update consultation model
-        consultation.pdf_filename = pdf_filename
-        consultation.pdf_file_path = pdf_file_path
+        # Update consultation model/doc
+        cid = getattr(consultation, "consultation_id", consultation.get("consultation_id") if isinstance(consultation, dict) else 1)
+        pid = getattr(patient, "patient_id", patient.get("patient_id") if isinstance(patient, dict) else 1)
+        rid = getattr(consultation, "report_id", consultation.get("report_id") if isinstance(consultation, dict) else "")
+        did = getattr(consultation, "doctor_id", consultation.get("doctor_id") if isinstance(consultation, dict) else 1)
 
-        # Insert or update into medical_reports SQL table
-        existing_report = db.query(MedicalReport).filter(MedicalReport.consultation_id == consultation.consultation_id).first()
-        if existing_report:
-            existing_report.pdf_filename = pdf_filename
-            existing_report.pdf_file_path = pdf_file_path
-            existing_report.pdf_base64_data = pdf_base64
-            existing_report.file_size_bytes = file_size
-            existing_report.signed_doctor_name = doctor_name
-            existing_report.signed_doctor_reg = doctor_reg
-            db.commit()
-            db.refresh(existing_report)
-            report_record = existing_report
-        else:
-            report_record = MedicalReport(
-                consultation_id=consultation.consultation_id,
-                patient_id=patient.patient_id,
-                doctor_id=consultation.doctor_id,
-                report_code=consultation.report_id,
-                pdf_filename=pdf_filename,
-                pdf_file_path=pdf_file_path,
-                pdf_base64_data=pdf_base64,
-                file_size_bytes=file_size,
-                mime_type="application/pdf",
-                signed_doctor_name=doctor_name,
-                signed_doctor_reg=doctor_reg,
-                status="CONFIRMED_SIGNED",
-                created_at=datetime.now(timezone.utc)
-            )
-            db.add(report_record)
-            db.commit()
-            db.refresh(report_record)
+        try:
+            if hasattr(db, "consultations"):
+                db.consultations.update_one(
+                    {"consultation_id": cid},
+                    {"$set": {"pdf_filename": pdf_filename, "pdf_file_path": pdf_file_path}}
+                )
+                report_record = {
+                    "consultation_id": cid,
+                    "patient_id": pid,
+                    "doctor_id": did,
+                    "report_code": rid,
+                    "pdf_filename": pdf_filename,
+                    "pdf_file_path": pdf_file_path,
+                    "pdf_base64_data": pdf_base64,
+                    "file_size_bytes": file_size,
+                    "mime_type": "application/pdf",
+                    "signed_doctor_name": doctor_name,
+                    "signed_doctor_reg": doctor_reg,
+                    "status": "CONFIRMED_SIGNED",
+                    "created_at": datetime.now(timezone.utc)
+                }
+                db.medical_reports.update_one(
+                    {"consultation_id": cid},
+                    {"$set": report_record},
+                    upsert=True
+                )
+            elif hasattr(db, "query"):
+                existing_report = db.query(MedicalReport).filter(MedicalReport.consultation_id == cid).first()
+                if existing_report:
+                    existing_report.pdf_filename = pdf_filename
+                    existing_report.pdf_file_path = pdf_file_path
+                    existing_report.pdf_base64_data = pdf_base64
+                    existing_report.file_size_bytes = file_size
+                    db.commit()
+                    report_record = existing_report
+                else:
+                    report_record = MedicalReport(
+                        consultation_id=cid,
+                        patient_id=pid,
+                        doctor_id=did,
+                        report_code=rid,
+                        pdf_filename=pdf_filename,
+                        pdf_file_path=pdf_file_path,
+                        pdf_base64_data=pdf_base64,
+                        file_size_bytes=file_size,
+                        mime_type="application/pdf",
+                        signed_doctor_name=doctor_name,
+                        signed_doctor_reg=doctor_reg,
+                        status="CONFIRMED_SIGNED",
+                        created_at=datetime.now(timezone.utc)
+                    )
+                    db.add(report_record)
+                    db.commit()
+            else:
+                report_record = {"pdf_filename": pdf_filename, "pdf_file_path": pdf_file_path}
+        except Exception as e:
+            logger.warning(f"Error saving PDF record in database: {e}")
+            report_record = {"pdf_filename": pdf_filename, "pdf_file_path": pdf_file_path}
 
-        logger.info(f"Kannada Unicode PDF Prescription generated & saved in SQL database: {pdf_filename} ({file_size} bytes)")
+        logger.info(f"Kannada Unicode PDF Prescription generated: {pdf_filename} ({file_size} bytes)")
         return report_record
