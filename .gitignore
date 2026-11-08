@@ -1,0 +1,27 @@
+# Environments and Secrets
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+venv/
+.venv/
+env/
+ENV/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+medical_system.db
+
+# Generated PDFs and tests
+*.pdf
+test_*.pdf
