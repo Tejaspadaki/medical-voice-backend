@@ -77,16 +77,6 @@ class AuthService:
         expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         return new_access_token, expires_in
 
-        role_name = user.role.name if user.role else "Unknown"
-        claims = {
-            "email": user.email,
-            "role": role_name,
-            "full_name": user.full_name or ""
-        }
-        new_access_token = create_access_token(subject=user.user_id, extra_claims=claims)
-        expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-        return new_access_token, expires_in
-
     @staticmethod
     def logout(token: Optional[str]) -> None:
         if token:
