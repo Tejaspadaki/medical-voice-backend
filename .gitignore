@@ -25,3 +25,4 @@ medical_system.db
 # Generated PDFs and tests
 *.pdf
 test_*.pdf
+

@@ -24,3 +24,4 @@ services:
         generateValue: true
       - key: DATABASE_URL
         value: sqlite:///./medical_system.db
+

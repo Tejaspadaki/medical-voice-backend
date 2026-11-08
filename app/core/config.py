@@ -37,8 +37,8 @@ class Settings(BaseSettings):
     VOICE_ACTION_TTL_SECONDS: int = 300
     DEFAULT_CLINICAL_LANGUAGE: str = "kn"
 
-    # CORS
-    CORS_ORIGINS: List[str] = [
+    # CORS Configuration
+    CORS_ORIGINS: Union[str, List[str]] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:5173",
@@ -46,12 +46,38 @@ class Settings(BaseSettings):
     ]
 
     @field_validator("CORS_ORIGINS", mode="before")
-    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
-        if isinstance(v, str) and not v.startswith("["):
-            return [i.strip() for i in v.split(",")]
-        elif isinstance(v, str) and v.startswith("["):
-            return json.loads(v)
+    def assemble_cors_origins(cls, v: Any) -> Union[str, List[str]]:
+        if isinstance(v, list):
+            return [str(item).strip() for item in v if str(item).strip()]
+        if isinstance(v, str):
+            clean_v = v.strip()
+            if not clean_v:
+                return []
+            if clean_v.startswith("[") and clean_v.endswith("]"):
+                try:
+                    parsed = json.loads(clean_v)
+                    if isinstance(parsed, list):
+                        return [str(item).strip() for item in parsed if str(item).strip()]
+                except Exception:
+                    clean_v = clean_v.strip("[]").replace("'", "").replace('"', "")
+            return [i.strip() for i in clean_v.split(",") if i.strip()]
         return v
+
+    @property
+    def cors_origins_list(self) -> List[str]:
+        if isinstance(self.CORS_ORIGINS, list):
+            return self.CORS_ORIGINS
+        if isinstance(self.CORS_ORIGINS, str):
+            clean = self.CORS_ORIGINS.strip()
+            if clean.startswith("[") and clean.endswith("]"):
+                try:
+                    parsed = json.loads(clean)
+                    if isinstance(parsed, list):
+                        return [str(i).strip() for i in parsed if str(i).strip()]
+                except Exception:
+                    clean = clean.strip("[]").replace("'", "").replace('"', "")
+            return [i.strip() for i in clean.split(",") if i.strip()]
+        return ["*"]
 
     model_config = SettingsConfigDict(
         env_file=[str(BASE_DIR / ".env"), ".env", "backend/.env"],
