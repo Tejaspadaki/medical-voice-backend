@@ -164,6 +164,55 @@ def init_mongo_db():
             })
             logger.info("MongoDB: Seeded doctor account (poornachandrabadiger208@gmail.com)")
 
+        # 3c. Seed Additional Doctors
+        new_doctors_data = [
+            {
+                "email": "amoghkori229@gmail.com",
+                "password": "Amogh@123",
+                "full_name": "Dr. Amogh Kori, MBBS, MD",
+                "specialization": "Consultant Physician & Internal Medicine",
+                "registration_no": "KMC-93821",
+                "department": "Outpatient Department (OPD)"
+            },
+            {
+                "email": "sasanuranand@gmail.com",
+                "password": "Anand@123",
+                "full_name": "Dr. Anand Sasanur, MBBS, MS",
+                "specialization": "Consultant Surgeon & General Medicine",
+                "registration_no": "KMC-94102",
+                "department": "Outpatient Department (OPD)"
+            },
+            {
+                "email": "sajjanpraveenkumar382@gmail.com",
+                "password": "Praveen@123",
+                "full_name": "Dr. Praveen Kumar Sajjan, MBBS, MD",
+                "specialization": "Consultant Physician & Pulmonology",
+                "registration_no": "KMC-95240",
+                "department": "Outpatient Department (OPD)"
+            }
+        ]
+        for nd in new_doctors_data:
+            if not db.users.find_one({"email": nd["email"]}):
+                nd_id = get_next_sequence("user_id", db)
+                db.users.insert_one({
+                    "user_id": nd_id,
+                    "email": nd["email"],
+                    "hashed_password": get_password_hash(nd["password"]),
+                    "full_name": nd["full_name"],
+                    "role_id": 2,
+                    "role_name": "Doctor",
+                    "is_active": True,
+                    "created_at": datetime.now(timezone.utc),
+                    "doctor_profile": {
+                        "doctor_id": nd_id,
+                        "specialization": nd["specialization"],
+                        "registration_no": nd["registration_no"],
+                        "department": nd["department"],
+                        "contact_phone": "+919845012345"
+                    }
+                })
+                logger.info(f"MongoDB: Seeded doctor account ({nd['email']})")
+
         # 4. Seed Default Admin Account
         admin_email = "admin@hospital.org"
         if not db.users.find_one({"email": admin_email}):
