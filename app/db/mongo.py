@@ -141,6 +141,29 @@ def init_mongo_db():
             })
             logger.info("MongoDB: Seeded default doctor account (doctor@hospital.org / Doctor123!)")
 
+        # 3b. Seed Dr. Poornachandra Badiger
+        poorna_email = "poornachandrabadiger208@gmail.com"
+        if not db.users.find_one({"email": poorna_email}):
+            p_doc_id = get_next_sequence("user_id", db)
+            db.users.insert_one({
+                "user_id": p_doc_id,
+                "email": poorna_email,
+                "hashed_password": get_password_hash("Poorna@030"),
+                "full_name": "Dr. Poornachandra Badiger, MBBS, MD",
+                "role_id": 2,
+                "role_name": "Doctor",
+                "is_active": True,
+                "created_at": datetime.now(timezone.utc),
+                "doctor_profile": {
+                    "doctor_id": p_doc_id,
+                    "specialization": "Consultant Physician & General Medicine",
+                    "registration_no": "KMC-92415",
+                    "department": "Outpatient Department (OPD)",
+                    "contact_phone": "+919845012345"
+                }
+            })
+            logger.info("MongoDB: Seeded doctor account (poornachandrabadiger208@gmail.com)")
+
         # 4. Seed Default Admin Account
         admin_email = "admin@hospital.org"
         if not db.users.find_one({"email": admin_email}):
