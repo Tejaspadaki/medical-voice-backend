@@ -32,11 +32,17 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS configuration
+# CORS configuration - dynamically matches and reflects calling origin for complete cross-device support
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list if settings.cors_origins_list else ["*"],
-    allow_origin_regex=r"https://.*\.onrender\.com",
+    allow_origins=[
+        "https://medical-voice-fe.netlify.app",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+    ],
+    allow_origin_regex=r"https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
