@@ -228,6 +228,21 @@ def init_mongo_db():
                 "created_at": datetime.now(timezone.utc)
             })
 
+        # 4b. Seed Default Staff Account
+        staff_email = "staff@hospital.org"
+        if not db.users.find_one({"email": staff_email}):
+            staff_id = get_next_sequence("user_id", db)
+            db.users.insert_one({
+                "user_id": staff_id,
+                "email": staff_email,
+                "hashed_password": get_password_hash("Staff123!"),
+                "full_name": "Pooja Sharma (Staff Nurse)",
+                "role_id": 3,
+                "role_name": "Staff",
+                "is_active": True,
+                "created_at": datetime.now(timezone.utc)
+            })
+
         # 5. Seed Initial Patients if none exist
         if db.patients.count_documents({}) == 0:
             sample_patients = [
