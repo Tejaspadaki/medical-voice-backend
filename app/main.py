@@ -10,6 +10,7 @@ from app.api.v1.consultations import router as consultations_router
 from app.api.v1.voice_agent import router as voice_agent_router
 from app.api.v1.clinical_assessment import router as clinical_assessment_router
 from app.api.v1.ml_experiment_lab import router as ml_experiment_router
+from app.api.v1.admin import router as admin_router
 from app.db.mongo import init_mongo_db
 
 @asynccontextmanager
@@ -66,6 +67,7 @@ app.include_router(consultations_router, prefix="/api")
 app.include_router(voice_agent_router, prefix="/api")
 app.include_router(clinical_assessment_router, prefix="/api")
 app.include_router(ml_experiment_router, prefix="/api")
+app.include_router(admin_router, prefix="/api")
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(patients_router, prefix="/api/v1")
@@ -73,6 +75,7 @@ app.include_router(consultations_router, prefix="/api/v1")
 app.include_router(voice_agent_router, prefix="/api/v1")
 app.include_router(clinical_assessment_router, prefix="/api/v1")
 app.include_router(ml_experiment_router, prefix="/api/v1")
+app.include_router(admin_router, prefix="/api/v1")
 
 @app.get("/", tags=["Root"])
 def root():

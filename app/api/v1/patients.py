@@ -18,12 +18,12 @@ router = APIRouter(prefix="/patients", tags=["Patients"])
     response_model=PatientResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create New Patient Record",
-    description="Register a new patient into the hospital documentation system. Requires Doctor, Admin, or Staff role."
+    description="Register a new patient into the hospital documentation system. Requires Doctor or Staff role (Admin manages doctors/staff only)."
 )
 def create_patient(
     patient_in: PatientCreate,
     db = Depends(get_mongo_db),
-    current_user: MongoUser = Depends(require_roles(["Doctor", "Admin", "Staff"]))
+    current_user: MongoUser = Depends(require_roles(["Doctor", "Staff"]))
 ):
     return PatientService.create_patient(db, patient_in)
 
@@ -40,7 +40,7 @@ def list_patients(
     page: int = Query(1, ge=1, description="Page number"),
     size: int = Query(20, ge=1, le=100, description="Items per page"),
     db = Depends(get_mongo_db),
-    current_user: MongoUser = Depends(get_current_user)
+    current_user: MongoUser = Depends(require_roles(["Doctor", "Staff"]))
 ):
     items, total = PatientService.list_patients(
         db=db,
@@ -66,7 +66,7 @@ def list_patients(
 def get_patient(
     patient_id: int = Path(..., ge=1, description="Primary key ID of patient"),
     db = Depends(get_mongo_db),
-    current_user: MongoUser = Depends(get_current_user)
+    current_user: MongoUser = Depends(require_roles(["Doctor", "Staff"]))
 ):
     patient = PatientService.get_patient_by_id(db, patient_id)
     return PatientResponse.model_validate(patient)
@@ -81,7 +81,7 @@ def update_patient(
     patient_id: int = Path(..., ge=1),
     update_in: PatientUpdate = ...,
     db = Depends(get_mongo_db),
-    current_user: MongoUser = Depends(require_roles(["Doctor", "Admin", "Staff"]))
+    current_user: MongoUser = Depends(require_roles(["Doctor", "Staff"]))
 ):
     patient = PatientService.update_patient(db, patient_id, update_in)
     return PatientResponse.model_validate(patient)
@@ -95,7 +95,7 @@ def update_patient(
 def delete_patient(
     patient_id: int = Path(..., ge=1),
     db = Depends(get_mongo_db),
-    current_user: MongoUser = Depends(require_roles(["Admin", "Doctor"]))
+    current_user: MongoUser = Depends(require_roles(["Doctor"]))
 ):
     PatientService.delete_patient(db, patient_id)
     return None
