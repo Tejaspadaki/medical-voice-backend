@@ -331,8 +331,49 @@ class VoiceOrchestratorService:
             current_patient = db.patients.find_one({"patient_id": session.patient_id}) if session.patient_id else None
             patient_name = current_patient.get("full_name") if current_patient else "ಆಯ್ಕೆಯಾದ ರೋಗಿ"
 
+            # Run Patient-Specific Clinical Assessment & Medication Safety Check (advisory, never auto-saved as EHR)
+            safety_alerts_kn = []
+            if current_patient:
+                try:
+                    from app.schemas.clinical_assessment import ClinicalAssessmentRequest, VitalsInput
+                    from app.services.clinical_assessment_service import ClinicalAssessmentService
+                    from app.services.medication_decision_service import MedicationDecisionService
+
+                    vitals_obj = VitalsInput(**extracted_data["vitals"]) if extracted_data.get("vitals") else None
+                    req_meds = [m.get("drug_name", "").split("(")[0].strip() for m in extracted_data.get("medications", []) if m.get("drug_name")]
+                    assess_req = ClinicalAssessmentRequest(
+                        patient_id=int(current_patient.get("patient_id")),
+                        symptoms=extracted_data.get("symptoms", []),
+                        vitals=vitals_obj,
+                        clinical_notes=cleaned_input,
+                        requested_medications=req_meds,
+                        language=session.language or "kn",
+                    )
+                    assessment = ClinicalAssessmentService.analyze_patient(
+                        req=assess_req,
+                        patient_doc=current_patient,
+                        created_by_user_id=getattr(doctor, "user_id", None),
+                    )
+                    opts, inters, alls, unsup = MedicationDecisionService.evaluate_medications(assessment, req_meds)
+                    assessment["medication_options"] = opts
+                    assessment["drug_interaction_alerts"] = inters
+                    assessment["allergy_warnings"] = alls
+                    assessment["unsupported_requests"] = unsup
+                    db.clinical_assessments.insert_one(dict(assessment))
+                    extracted_data["clinical_assessment_id"] = assessment["assessment_id"]
+                    if assessment.get("has_emergency_flags"):
+                        safety_alerts_kn.append(f"ತುರ್ತು ಎಚ್ಚರಿಕೆ: {assessment['emergency_warning_signs'][0]['kannada_sign']}.")
+                    if alls:
+                        safety_alerts_kn.append(f"ಅಲರ್ಜಿ ಎಚ್ಚರಿಕೆ: {alls[0]['message']}")
+                    elif inters:
+                        safety_alerts_kn.append(f"ಔಷಧ ಅಡ್ಡಪರಿಣಾಮ ಎಚ್ಚರಿಕೆ: {inters[0]['recommendation']}")
+                except Exception as e:
+                    logger.warning(f"Voice orchestrator clinical assessment advisory warning: {e}")
+
             # Formulate Kannada & English Readbacks
             spoken_kn, spoken_en = cls._formulate_confirmation_readback(patient_name, extracted_data)
+            if safety_alerts_kn:
+                spoken_kn = f"{' '.join(safety_alerts_kn)} {spoken_kn}"
 
             # Create Pending Action with 5-minute TTL
             pending_action_doc = {
@@ -502,14 +543,16 @@ class VoiceOrchestratorService:
                 payload=consultation_req,
                 current_user=acting_doctor
             )
+            c_id = consultation.get("consultation_id") if isinstance(consultation, dict) else getattr(consultation, "consultation_id", None)
+            r_id = consultation.get("report_id") if isinstance(consultation, dict) else getattr(consultation, "report_id", None)
             return VoiceConfirmResponse(
                 success=True,
                 action_id=action_id,
                 status="confirmed",
                 message="Consultation verified, signed and saved to EHR.",
-                consultation_id=consultation.consultation_id,
-                report_id=consultation.report_id,
-                tts_confirmation=f"ಸಮಾಲೋಚನೆ ವರದಿ #{consultation.report_id} ಯಶಸ್ವಿಯಾಗಿ ಮುಕ್ತಾಯಗೊಂಡಿದೆ."
+                consultation_id=c_id,
+                report_id=r_id,
+                tts_confirmation=f"ಸಮಾಲೋಚನೆ ವರದಿ #{r_id} ಯಶಸ್ವಿಯಾಗಿ ಮುಕ್ತಾಯಗೊಂಡಿದೆ."
             )
         except Exception as e:
             logger.error(f"Error executing pending clinical action: {e}", exc_info=True)

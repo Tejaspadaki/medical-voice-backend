@@ -108,6 +108,10 @@ def init_mongo_db():
         db.voice_chat_turns.create_index("session_id")
         db.pending_clinical_actions.create_index("action_id", unique=True)
         db.pending_clinical_actions.create_index("session_id")
+        db.clinical_assessments.create_index("assessment_id", unique=True)
+        db.clinical_assessments.create_index("patient_id")
+        db.clinical_audit_logs.create_index("audit_id", unique=True)
+        db.clinical_audit_logs.create_index("assessment_id")
 
         # 2. Seed Default Roles
         roles_data = [

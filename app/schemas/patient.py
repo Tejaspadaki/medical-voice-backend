@@ -12,6 +12,12 @@ class PatientBase(BaseModel):
     emergency_contact: Optional[str] = Field(None, json_schema_extra={"example": "+919876543211 (Brother)"})
     blood_group: Optional[str] = Field(None, json_schema_extra={"example": "B+"})
     preferred_language: Optional[str] = Field("Kannada", json_schema_extra={"example": "Kannada"})
+    allergies: List[str] = Field(default_factory=list)
+    existing_conditions: List[str] = Field(default_factory=list)
+    medical_history: List[str] = Field(default_factory=list)
+    current_medications: List[str] = Field(default_factory=list)
+    weight_kg: Optional[float] = Field(None, gt=0, le=500)
+    pregnancy_status: Optional[str] = Field("unknown")
 
 class PatientCreate(PatientBase):
     pass
@@ -26,6 +32,12 @@ class PatientUpdate(BaseModel):
     emergency_contact: Optional[str] = None
     blood_group: Optional[str] = None
     preferred_language: Optional[str] = None
+    allergies: Optional[List[str]] = None
+    existing_conditions: Optional[List[str]] = None
+    medical_history: Optional[List[str]] = None
+    current_medications: Optional[List[str]] = None
+    weight_kg: Optional[float] = Field(None, gt=0, le=500)
+    pregnancy_status: Optional[str] = None
 
 class PatientResponse(PatientBase):
     patient_id: int

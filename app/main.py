@@ -8,6 +8,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.patients import router as patients_router
 from app.api.v1.consultations import router as consultations_router
 from app.api.v1.voice_agent import router as voice_agent_router
+from app.api.v1.clinical_assessment import router as clinical_assessment_router
 from app.db.mongo import init_mongo_db
 
 @asynccontextmanager
@@ -62,11 +63,13 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(patients_router, prefix="/api")
 app.include_router(consultations_router, prefix="/api")
 app.include_router(voice_agent_router, prefix="/api")
+app.include_router(clinical_assessment_router, prefix="/api")
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(patients_router, prefix="/api/v1")
 app.include_router(consultations_router, prefix="/api/v1")
 app.include_router(voice_agent_router, prefix="/api/v1")
+app.include_router(clinical_assessment_router, prefix="/api/v1")
 
 @app.get("/", tags=["Root"])
 def root():

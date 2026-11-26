@@ -177,26 +177,49 @@ class EnglishToKannadaMedicalTranslator:
         """
         lower = english_text.lower()
 
-        # 1. Symptoms Extraction
+        # 1. Symptoms Extraction (English & Kannada keywords)
+        KANNADA_SYMPTOM_MAP = {
+            "ತೀವ್ರ ಜ್ವರ": ("ತೀವ್ರ ಜ್ವರ (High Fever)", "High Fever"),
+            "ಜ್ವರ": ("ಜ್ವರ (Fever)", "Fever"),
+            "ಒಣ ಕೆಮ್ಮು": ("ಒಣ ಕೆಮ್ಮು (Dry Cough)", "Dry Cough"),
+            "ಕೆಮ್ಮು": ("ಕೆಮ್ಮು (Cough)", "Cough"),
+            "ಗಂಟಲು ನೋವು": ("ಗಂಟಲು ನೋವು (Sore Throat)", "Sore Throat"),
+            "ತಲೆನೋವು": ("ತಲೆನೋವು (Headache)", "Headache"),
+            "ಆಯಾಸ": ("ಆಯಾಸ ಮತ್ತು ನಿಶ್ಯಕ್ತಿ (Fatigue)", "Fatigue"),
+            "ಹೊಟ್ಟೆನೋವು": ("ಹೊಟ್ಟೆನೋವು (Abdominal Pain)", "Abdominal Pain"),
+            "ಹೊಟ್ಟೆ ಉರಿ": ("ಹೊಟ್ಟೆಯಲ್ಲಿ ತೀವ್ರ ಉರಿ (Burning Sensation)", "Burning Sensation"),
+            "ವಾಂತಿ": ("ವಾಂತಿ (Vomiting)", "Vomiting"),
+            "ಎದೆನೋವು": ("ಎದೆನೋವು (Chest Pain)", "Chest Pain"),
+            "ಉಸಿರಾಟದ ತೊಂದರೆ": ("ಉಸಿರಾಟದ ತೊಂದರೆ (Shortness of Breath)", "Shortness of Breath"),
+            "ಭೇದಿ": ("ಭೇದಿ (Diarrhea)", "Diarrhea"),
+            "ತಲೆತಿರುಗುವಿಕೆ": ("ತಲೆತಿರುಗುವಿಕೆ (Dizziness)", "Dizziness"),
+        }
+
         symptoms = []
+        seen_english = set()
         for en_sym, kn_sym in cls.SYMPTOM_MAP.items():
             if en_sym in lower:
-                # Look for duration near symptom
                 dur_match = re.search(rf"{en_sym}[^.]*?(?:for|since)?\s*(\d+\s*(?:day|days|week|weeks|month|months))", lower)
-                raw_dur = dur_match.group(1) if dur_match else "೨-೩ ದಿನಗಳು (2-3 days)"
+                raw_dur = dur_match.group(1) if dur_match else ""
                 symptoms.append({
                     "entity": kn_sym,
                     "english": en_sym.title(),
-                    "duration": cls.translate_duration_to_kannada(raw_dur),
+                    "duration": cls.translate_duration_to_kannada(raw_dur) if raw_dur else "",
                     "confidence": 0.95
                 })
+                seen_english.add(en_sym.title())
 
-        if not symptoms:
-            symptoms = [
-                {"entity": "ಜ್ವರ ಮತ್ತು ಮೈಕೈ ನೋವು (Fever & Body Ache)", "english": "Fever & Body Ache", "duration": "೩ ದಿನಗಳು (3 days)", "confidence": 0.90}
-            ]
+        for kn_kw, (kn_sym, en_label) in KANNADA_SYMPTOM_MAP.items():
+            if kn_kw in english_text and en_label not in seen_english:
+                symptoms.append({
+                    "entity": kn_sym,
+                    "english": en_label,
+                    "duration": "",
+                    "confidence": 0.92
+                })
+                seen_english.add(en_label)
 
-        # 2. Diagnosis Extraction
+        # 2. Diagnosis Extraction (no hardcoded fallback)
         diagnosis = []
         for en_diag, kn_diag in cls.DIAGNOSIS_MAP.items():
             if en_diag in lower:
@@ -206,56 +229,36 @@ class EnglishToKannadaMedicalTranslator:
                     "confidence": 0.96
                 })
 
-        if not diagnosis:
-            diagnosis = [
-                {"entity": "ಸಾಮಾನ್ಯ ವೈದ್ಯಕೀಯ ತಪಾಸಣೆ ಮತ್ತು ಚಿಕಿತ್ಸೆ (General Medical Examination)", "english": "General Examination", "confidence": 0.92}
-            ]
-
-        # 3. Medications Extraction
+        # 3. Medications Extraction (strictly what was spoken/written; NEVER invent Paracetamol)
         medications = []
         for en_drug, kn_drug in cls.COMMON_DRUGS:
             if en_drug in lower:
-                # Find dosage (e.g., 650mg, 500mg, 40mg)
                 dose_match = re.search(rf"{en_drug}\s*(\d+\s*(?:mg|ml|gm))?", lower)
-                dosage = dose_match.group(1) if dose_match and dose_match.group(1) else "೬೫೦ ಮಿ.ಗ್ರಾಂ"
-                
-                # Find frequency
-                freq = "ದಿನಕ್ಕೆ ೨ ಬಾರಿ (ಬೆಳಗ್ಗೆ ಮತ್ತು ರಾತ್ರಿ - BD)"
+                dosage = dose_match.group(1) if dose_match and dose_match.group(1) else ""
+
+                freq = ""
                 for en_f, kn_f in cls.FREQUENCY_MAP.items():
                     if en_f in lower:
                         freq = kn_f
                         break
 
-                # Find duration
-                dur = "೩ ದಿನಗಳು (3 Days)"
+                dur = ""
                 dur_match = re.search(r"(\d+\s*(?:day|days|week|weeks|month|months))", lower)
                 if dur_match:
                     dur = cls.translate_duration_to_kannada(dur_match.group(1))
 
                 medications.append({
                     "drug_name": kn_drug,
-                    "dosage": cls.translate_dosage_to_kannada(dosage),
-                    "frequency": freq,
-                    "duration": dur
+                    "dosage": cls.translate_dosage_to_kannada(dosage) if dosage else "Verify Dose",
+                    "frequency": freq or "Verify Frequency",
+                    "duration": dur or "Verify Duration"
                 })
-
-        if not medications:
-            medications = [
-                {"drug_name": "ಪ್ಯಾರಸಿಟಮಾಲ್ (Paracetamol)", "dosage": "೬೫೦ ಮಿ.ಗ್ರಾಂ (650mg)", "frequency": "ದಿನಕ್ಕೆ ೩ ಬಾರಿ ಊಟದ ನಂತರ (TDS)", "duration": "೩ ದಿನಗಳು (3 Days)"}
-            ]
 
         # 4. Advice Extraction
         advice = []
         for en_adv, kn_adv in cls.ADVICE_MAP.items():
             if en_adv in lower:
                 advice.append({"instruction": kn_adv})
-
-        if not advice:
-            advice = [
-                {"instruction": "ಉಗುರುಬೆಚ್ಚಗಿನ ನೀರನ್ನು ಸಾಕಷ್ಟು ಕುಡಿಯಿರಿ ಹಾಗೂ ತಂಪು ಪಾನೀಯಗಳನ್ನು ತ್ಯಜಿಸಿ."},
-                {"instruction": "ಸಂಪೂರ್ಣ ವಿಶ್ರಾಂತಿ ಪಡೆಯಿರಿ ಮತ್ತು ಸೂಚಿಸಿದ ಮಾತ್ರೆಗಳನ್ನು ತಪ್ಪದೇ ತೆಗೆದುಕೊಳ್ಳಿ."},
-                {"instruction": "ರೋಗಲಕ್ಷಣಗಳು ಕಡಿಮೆಯಾಗದಿದ್ದರೆ ತಕ್ಷಣ ಆಸ್ಪತ್ರೆಗೆ ಮರಳಿ ಭೇಟಿ ನೀಡಿ."}
-            ]
 
         return {
             "symptoms": symptoms,

@@ -24,6 +24,9 @@ from app.schemas.consultation import ConsultationCreateRequest, ConsultationResp
 from app.services.consultation_service import ConsultationService
 from app.core.logging import logger
 from app.services.medical_translator import EnglishToKannadaMedicalTranslator
+from app.schemas.clinical_assessment import ClinicalAssessmentRequest, VitalsInput
+from app.services.clinical_assessment_service import ClinicalAssessmentService
+from app.services.medication_decision_service import MedicationDecisionService
 
 router = APIRouter(prefix="/consultations", tags=["Consultations & Speech Transcription"])
 
@@ -128,6 +131,52 @@ class EnglishConsultationTextRequest(BaseModel):
     patient_id: int
     english_text: str
 
+def _build_draft_assessment(
+    db: Any,
+    patient: Dict[str, Any],
+    extracted_entities: Dict[str, Any],
+    notes_text: str,
+    user_id: Optional[int],
+    language: str = "en",
+) -> Dict[str, Any]:
+    """
+    Runs patient-specific clinical assessment & medication decision support
+    on extracted consultation entities and stores a PENDING_DOCTOR_REVIEW draft.
+    """
+    import re
+    bp_match = re.search(r'\b(\d{2,3}\s*/\s*\d{2,3})\b', notes_text or "")
+    vitals = VitalsInput(bp=bp_match.group(1).replace(" ", "")) if bp_match else None
+
+    req_meds = [
+        m.get("drug_name", "").split("(")[0].strip()
+        for m in (extracted_entities.get("medications") or [])
+        if m.get("drug_name")
+    ]
+    req = ClinicalAssessmentRequest(
+        patient_id=int(patient.get("patient_id")),
+        symptoms=extracted_entities.get("symptoms") or [],
+        vitals=vitals,
+        clinical_notes=notes_text,
+        requested_medications=req_meds,
+        language=language,
+    )
+    assessment = ClinicalAssessmentService.analyze_patient(
+        req=req,
+        patient_doc=patient,
+        created_by_user_id=user_id,
+    )
+    options, interactions, allergies, unsupported = MedicationDecisionService.evaluate_medications(
+        assessment_doc=assessment,
+        requested_medications=req_meds,
+    )
+    assessment["medication_options"] = options
+    assessment["drug_interaction_alerts"] = interactions
+    assessment["allergy_warnings"] = allergies
+    assessment["unsupported_requests"] = unsupported
+    db.clinical_assessments.insert_one(dict(assessment))
+    return assessment
+
+
 @router.post(
     "/process-english-text",
     summary="Directly Convert English Doctor Notes into Kannada Clinical Report",
@@ -147,6 +196,14 @@ async def process_english_text(
 
     kannada_transcript = EnglishToKannadaMedicalTranslator.translate_text_to_kannada(payload.english_text)
     kannada_entities = EnglishToKannadaMedicalTranslator.extract_from_english_text(payload.english_text)
+    assessment = _build_draft_assessment(
+        db=db,
+        patient=patient,
+        extracted_entities=kannada_entities,
+        notes_text=payload.english_text,
+        user_id=getattr(current_user, "user_id", None),
+        language="en",
+    )
 
     return {
         "success": True,
@@ -164,6 +221,7 @@ async def process_english_text(
             "confidence": 0.98
         },
         "entities": kannada_entities,
+        "clinical_assessment": assessment,
         "mandatory_review_required": True,
         "reviewed_by_doctor": False
     }
@@ -238,16 +296,25 @@ async def process_audio(
             except Exception as e:
                 logger.warning(f"Live audio processing fallback to clinical profile: {e}")
 
-        # 2. Fallback to Patient Clinical Profile or Deterministic Translator
+        # 2. Fallback to Patient Clinical Profile or empty non-static draft
         if not kannada_transcript:
             if profile:
                 original_speech = profile["english_spoken"] if is_english_input else profile["kannada_transcription"]
                 kannada_transcript = profile["kannada_transcription"]
                 kannada_entities = profile["entities"]
             else:
-                original_speech = f"Patient {p_name} presented for medical follow-up with complaints of fever and headache for 3 days. Prescribed Paracetamol 650mg TDS for 3 days. Advised warm water and complete rest."
-                kannada_transcript = EnglishToKannadaMedicalTranslator.translate_text_to_kannada(original_speech)
-                kannada_entities = EnglishToKannadaMedicalTranslator.extract_from_english_text(original_speech)
+                original_speech = ""
+                kannada_transcript = "ಧ್ವನಿ ಸ್ಪಷ್ಟವಾಗಿಲ್ಲ ಅಥವಾ ಆಡಿಯೋ ಅಪ್ಲೋಡ್ ಆಗಿಲ್ಲ. ದಯವಿಟ್ಟು ವೈದ್ಯಕೀಯ ಲಕ್ಷಣಗಳನ್ನು ನಮೂದಿಸಿ."
+                kannada_entities = {"symptoms": [], "diagnosis": [], "medications": [], "advice": []}
+
+        assessment = _build_draft_assessment(
+            db=db,
+            patient=patient,
+            extracted_entities=kannada_entities,
+            notes_text=original_speech or kannada_transcript or "",
+            user_id=getattr(current_user, "user_id", None),
+            language=language,
+        )
 
         return {
             "success": True,
@@ -266,6 +333,7 @@ async def process_audio(
                 "confidence": 0.97
             },
             "entities": kannada_entities,
+            "clinical_assessment": assessment,
             "mandatory_review_required": True,
             "reviewed_by_doctor": False
         }

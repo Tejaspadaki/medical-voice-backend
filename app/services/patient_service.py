@@ -31,6 +31,12 @@ class PatientService:
             "emergency_contact": patient_in.emergency_contact,
             "blood_group": patient_in.blood_group,
             "preferred_language": patient_in.preferred_language or "Kannada",
+            "allergies": patient_in.allergies,
+            "existing_conditions": patient_in.existing_conditions,
+            "medical_history": patient_in.medical_history,
+            "current_medications": patient_in.current_medications,
+            "weight_kg": patient_in.weight_kg,
+            "pregnancy_status": patient_in.pregnancy_status or "unknown",
             "created_at": now,
             "updated_at": now
         }
