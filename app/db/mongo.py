@@ -112,6 +112,9 @@ def init_mongo_db():
         db.clinical_assessments.create_index("patient_id")
         db.clinical_audit_logs.create_index("audit_id", unique=True)
         db.clinical_audit_logs.create_index("assessment_id")
+        db.audio_datasets.create_index("dataset_id", unique=True)
+        db.model_evaluations.create_index("evaluation_id", unique=True)
+        db.training_jobs.create_index("job_id", unique=True)
 
         # 2. Seed Default Roles
         roles_data = [
